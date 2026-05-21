@@ -1,0 +1,237 @@
+// PI ANIMALS clone — Prisma schema.
+// On-chain is the source of truth for ERC-721 ownership; `Pet` is an indexer cache.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Enums ----------
+
+enum Species {
+  DOG
+  CAT
+}
+
+enum AttributeTrait {
+  BEARD
+  BODY
+  EARS
+  EYES
+  EYEBROWS
+  FACE
+  NOSE
+  TAIL
+}
+
+enum Rarity {
+  COMMON
+  UNCOMMON
+  RARE
+  EPIC
+  LEGENDARY
+}
+
+enum PaymentPurpose {
+  MINT
+  PET_PURCHASE
+  LISTING_FEE
+  TOPUP
+}
+
+enum PaymentStatus {
+  CREATED
+  APPROVED
+  COMPLETED
+  CANCELLED
+  FAILED
+}
+
+enum ListingStatus {
+  ACTIVE
+  SOLD
+  CANCELLED
+}
+
+enum DrawStatus {
+  PENDING
+  REQUESTED
+  FULFILLED
+  PAID
+}
+
+// ---------- Models ----------
+
+model User {
+  id             String   @id @default(cuid())
+  piUid          String   @unique
+  username       String?  @unique
+  walletAddress  String?
+  referredById   String?
+  referredBy     User?    @relation("Refs", fields: [referredById], references: [id])
+  referrals      User[]   @relation("Refs")
+  vitality       Int      @default(0) // 0..100
+  petBalance     Decimal  @default(0) @db.Decimal(36, 18) // off-chain Pet ledger
+  isAdmin        Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  pets           Pet[]
+  payments       Payment[]
+  miningSessions MiningSession[]
+  lotteryEntries LotteryEntry[]
+  listings       MarketplaceListing[] @relation("Seller")
+  purchases      MarketplaceListing[] @relation("Buyer")
+  vitalityEvents VitalityEvent[]
+  dividendPayouts DividendPayout[]
+  referralsMade  Referral[]           @relation("Referrer")
+  referralRecord Referral?            @relation("Referee")
+
+  @@index([referredById])
+}
+
+model Pet {
+  id           String         @id @default(cuid())
+  ownerId      String
+  owner        User           @relation(fields: [ownerId], references: [id])
+  species      Species
+  generation   Int
+  tokenId      BigInt         @unique
+  contractAddr String
+  chainId      Int            @default(137)
+  metadataCid  String
+  imageCid     String
+  rarityScore  Int
+  miningRate   Decimal        @db.Decimal(36, 18)
+  lastMinedAt  DateTime       @default(now())
+  mintedAt     DateTime       @default(now())
+
+  attributes   PetAttribute[]
+  listing      MarketplaceListing?
+
+  @@index([ownerId, species])
+}
+
+model PetAttribute {
+  id     String         @id @default(cuid())
+  petId  String
+  pet    Pet            @relation(fields: [petId], references: [id], onDelete: Cascade)
+  trait  AttributeTrait
+  value  String
+  rarity Rarity
+
+  @@unique([petId, trait])
+}
+
+model Payment {
+  id             String         @id @default(cuid())
+  piPaymentId    String         @unique
+  userId         String
+  user           User           @relation(fields: [userId], references: [id])
+  amountPi       Decimal        @db.Decimal(36, 18)
+  purpose        PaymentPurpose
+  metadata       Json
+  status         PaymentStatus  @default(CREATED)
+  txid           String?
+  approvedAt     DateTime?
+  completedAt    DateTime?
+  idempotencyKey String         @unique
+  createdAt      DateTime       @default(now())
+
+  @@index([userId, status])
+}
+
+model MiningSession {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  startedAt  DateTime
+  endedAt    DateTime?
+  accruedPet Decimal  @db.Decimal(36, 18) @default(0)
+
+  @@index([userId, startedAt])
+}
+
+model Dividend {
+  id         String           @id @default(cuid())
+  snapshotAt DateTime
+  totalPool  Decimal          @db.Decimal(36, 18)
+  perPetUnit Decimal          @db.Decimal(36, 18)
+  payouts    DividendPayout[]
+}
+
+model DividendPayout {
+  id         String   @id @default(cuid())
+  dividendId String
+  dividend   Dividend @relation(fields: [dividendId], references: [id])
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  amount     Decimal  @db.Decimal(36, 18)
+
+  @@unique([dividendId, userId])
+}
+
+model LotteryDraw {
+  id           String       @id @default(cuid())
+  drawAt       DateTime
+  vrfRequestId String?      @unique
+  randomWord   String?
+  winnerUserId String?
+  prizeAmount  Decimal      @db.Decimal(36, 18)
+  status       DrawStatus   @default(PENDING)
+  entries      LotteryEntry[]
+}
+
+model LotteryEntry {
+  id     String      @id @default(cuid())
+  drawId String
+  draw   LotteryDraw @relation(fields: [drawId], references: [id])
+  userId String
+  user   User        @relation(fields: [userId], references: [id])
+  weight Int
+
+  @@unique([drawId, userId])
+}
+
+model MarketplaceListing {
+  id        String        @id @default(cuid())
+  petId     String        @unique
+  pet       Pet           @relation(fields: [petId], references: [id])
+  sellerId  String
+  seller    User          @relation("Seller", fields: [sellerId], references: [id])
+  priceInPi Decimal       @db.Decimal(36, 18)
+  status    ListingStatus @default(ACTIVE)
+  createdAt DateTime      @default(now())
+  soldAt    DateTime?
+  buyerId   String?
+  buyer     User?         @relation("Buyer", fields: [buyerId], references: [id])
+
+  @@index([status, createdAt])
+}
+
+model VitalityEvent {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  source    String
+  delta     Int
+  meta      Json
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model Referral {
+  id         String   @id @default(cuid())
+  referrerId String
+  referrer   User     @relation("Referrer", fields: [referrerId], references: [id])
+  refereeId  String   @unique
+  referee    User     @relation("Referee", fields: [refereeId], references: [id])
+  rewardPaid Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([referrerId])
+}
