@@ -3,6 +3,5 @@
   "buildCommand": "pnpm --filter web build",
   "installCommand": "pnpm install --frozen-lockfile",
   "outputDirectory": "apps/web/.next",
-  "framework": "nextjs",
-  "ignoreCommand": "git diff --quiet HEAD^ HEAD ':!packages/contracts' ':!ops' ':!branding'"
+  "framework": "nextjs"
 }
